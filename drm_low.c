@@ -9,7 +9,9 @@
 #include <errno.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include <inttypes.h>
 
+#define VOID2U64(x) ((uint64_t)(unsigned long)(x))
 
 /*
 int main (void) {
@@ -71,47 +73,137 @@ int main()
     //instantiate a drm_mode_card_res struct 
 	struct drm_mode_card_res res={0};
 
-
 	//Become the "master" of the DRI device
 	if (ioctl(dri_fd, DRM_IOCTL_SET_MASTER, 0)!=0) {
         fprintf(stderr, "Drm set master failed with eror %d: %m\n", errno);
 		return errno;
     }
+	printf("Drm master success\n");
 
-	//Get resource counts
-	ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res);
-	res.fb_id_ptr=(uint64_t)res_fb_buf;
-	res.crtc_id_ptr=(uint64_t)res_crtc_buf;
-	res.connector_id_ptr=(uint64_t)res_conn_buf;
-	res.encoder_id_ptr=(uint64_t)res_enc_buf;
+
+	//Get resource counts: this fills in count_fbs, count_crtcs, count_connectors, count_encoders
+	if (ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res)!=0) {
+		fprintf(stderr, "Drm mode getresources failed with eror %d: %m\n", errno);
+		return errno;
+	}
+	printf("Drm get resources success\n");
+
+
+	if (res.count_fbs) {
+		res.fb_id_ptr = VOID2U64(calloc(res.count_fbs, sizeof(uint32_t)));
+	}
+	if (res.count_crtcs) {
+		res.crtc_id_ptr = VOID2U64(calloc(res.count_crtcs, sizeof(uint32_t)));
+	}
+	if (res.count_connectors) {
+		res.connector_id_ptr = VOID2U64(calloc(res.count_connectors, sizeof(uint32_t)));
+	}
+	if (res.count_encoders) {
+		res.encoder_id_ptr = VOID2U64(calloc(res.count_encoders, sizeof(uint32_t)));
+	}
+
+
+	/*
+	//set the id array heads to the ones we created (10 uint64_ts allocated on the stack)
+	res.fb_id_ptr = (uint64_t)res_fb_buf;
+	res.crtc_id_ptr = (uint64_t)res_crtc_buf;
+	res.connector_id_ptr = (uint64_t)res_conn_buf;
+	res.encoder_id_ptr = (uint64_t)res_enc_buf;
+	*/
+
 	//Get resource IDs
-	ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res);
+	if (ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res)!=0) {
+		fprintf(stderr, "Drm mode getresources second failed with error %d: %m\n", errno);
+		return errno;
+	}
+	printf("Drm get resources second success\n");
 
-	printf("fb: %d, crtc: %d, conn: %d, enc: %d\n",res.count_fbs,res.count_crtcs,res.count_connectors,res.count_encoders);
 
-	void *fb_base[10];
+	//test
+	printf("%" PRId64 "\n", res.crtc_id_ptr);
+
+	//print out count information
+	printf("# framebuffs: %d, # CRTCs: %d, # connectors: %d, # encoders: %d\n",res.count_fbs,res.count_crtcs,res.count_connectors,res.count_encoders);
+
+	//array of actual pointers to starts of framebuffers in memory
+	void* fb_base[10];
+
+	//length of framebuffer
 	long fb_w[10];
+
+	//width of framebuffer
 	long fb_h[10];
 
-	//Loop though all available connectors
 	int i;
-	for (i=0;i<res.count_connectors;i++)
+
+
+	/*For reference
+	struct drm_mode_get_connector {
+	__u64 encoders_ptr;
+	__u64 modes_ptr;
+	__u64 props_ptr;
+	__u64 prop_values_ptr;
+
+	__u32 count_modes;
+	__u32 count_props;
+	__u32 count_encoders;
+
+	__u32 encoder_id; // Current Encoder 
+	__u32 connector_id; // Id 
+	__u32 connector_type;
+	__u32 connector_type_id;
+
+	__u32 connection;
+	__u32 mm_width, mm_height; // HxW in millimeters 
+	__u32 subpixel;
+	};
+
+
+
+	struct drm_mode_modeinfo {
+		__u32 clock;
+		__u16 hdisplay, hsync_start, hsync_end, htotal, hskew;
+		__u16 vdisplay, vsync_start, vsync_end, vtotal, vscan;
+
+		__u32 vrefresh;
+
+		__u32 flags;
+		__u32 type;
+		char name[DRM_DISPLAY_MODE_LEN];
+	};*/
+
+
+	//Loop though all available connectors
+	for (i=0; i<res.count_connectors; i++)
 	{
 		struct drm_mode_modeinfo conn_mode_buf[20]={0};
-		uint64_t	conn_prop_buf[20]={0},
-					conn_propval_buf[20]={0},
-					conn_enc_buf[20]={0};
+
+		uint64_t conn_prop_buf[20]={0}, conn_propval_buf[20]={0}, conn_enc_buf[20]={0};
 
 		struct drm_mode_get_connector conn={0};
 
 		conn.connector_id=res_conn_buf[i];
 
-		ioctl(dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn);	//get connector resource counts
+		//get connector resource counts
+		if (ioctl (dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
+			fprintf(stderr, "Drm mode getconnector failed with error %d: %m\n", errno);
+			return errno;
+		}
+		printf("Drm get connector success\n");
+
+
 		conn.modes_ptr=(uint64_t)conn_mode_buf;
 		conn.props_ptr=(uint64_t)conn_prop_buf;
 		conn.prop_values_ptr=(uint64_t)conn_propval_buf;
 		conn.encoders_ptr=(uint64_t)conn_enc_buf;
-		ioctl(dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn);	//get connector resources
+
+
+		//get connector resources
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
+			fprintf(stderr, "Drm mode getconnector second failed with error %d: %m\n", errno);
+			return errno;
+		}
+		printf("Drm get connector second success\n");
 
 		//Check if the connector is OK to use (connected to something)
 		if (conn.count_encoders<1 || conn.count_modes<1 || !conn.encoder_id || !conn.connection)
