@@ -12,6 +12,7 @@
 #include <inttypes.h>
 
 #define VOID2U64(x) ((uint64_t)(unsigned long)(x))
+#define U642VOID(x) ((void *)(unsigned long)(x))
 
 /*
 int main (void) {
@@ -180,9 +181,9 @@ int main()
 
 		uint64_t conn_prop_buf[20]={0}, conn_propval_buf[20]={0}, conn_enc_buf[20]={0};
 
-		struct drm_mode_get_connector conn={0};
+		struct drm_mode_get_connector conn = {0};
 
-		conn.connector_id=res_conn_buf[i];
+		conn.connector_id = ((uint64_t*)(U642VOID(res.connector_id_ptr)))[i];
 
 		//get connector resource counts
 		if (ioctl (dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
