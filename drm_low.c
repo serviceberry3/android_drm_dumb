@@ -124,7 +124,7 @@ int main()
 	printf("%" PRId64 "\n", res.crtc_id_ptr);
 
 	//print out count information
-	printf("# framebuffs: %d, # CRTCs: %d, # connectors: %d, # encoders: %d\n",res.count_fbs,res.count_crtcs,res.count_connectors,res.count_encoders);
+	printf("# framebuffs: %d, # CRTCs: %d, # connectors: %d, # encoders: %d\n", res.count_fbs, res.count_crtcs, res.count_connectors, res.count_encoders);
 
 	//array of actual pointers to starts of framebuffers in memory
 	void* fb_base[10];
@@ -136,7 +136,6 @@ int main()
 	long fb_h[10];
 
 	int i;
-
 
 	/*For reference
 	struct drm_mode_get_connector {
@@ -175,7 +174,7 @@ int main()
 
 
 	//Loop though all available connectors
-	for (i=0; i<res.count_connectors; i++)
+	for (i = 0; i < res.count_connectors; i++)
 	{
 		struct drm_mode_modeinfo conn_mode_buf[20]={0};
 
@@ -183,7 +182,11 @@ int main()
 
 		struct drm_mode_get_connector conn = {0};
 
-		conn.connector_id = ((uint64_t*)(U642VOID(res.connector_id_ptr)))[i];
+		printf("The pointer to the connector ID list is %p, our index is %d, we're looking at address %p\n", (uint64_t*)(U642VOID(res.connector_id_ptr)), i, &((uint64_t*)(U642VOID(res.connector_id_ptr)))[i]);
+		conn.connector_id = ((uint32_t*)(U642VOID(res.connector_id_ptr)))[i];
+
+		printf("This connector ID: ");
+		printf("%d\n", conn.connector_id);
 
 		//get connector resource counts
 		if (ioctl (dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
@@ -192,12 +195,28 @@ int main()
 		}
 		printf("Drm get connector success\n");
 
+		if (conn.count_props) {
+			conn.props_ptr = VOID2U64(calloc(conn.count_props, sizeof(uint32_t)));
+			//TODO: add malloc check
+			conn.prop_values_ptr = VOID2U64(calloc(conn.count_props, sizeof(uint64_t)));
+		}
 
+		if (conn.count_modes) {
+			conn.modes_ptr = VOID2U64(calloc(conn.count_modes, sizeof(struct drm_mode_modeinfo)));
+		}
+		//TODO: add else check??
+
+	
+		if (conn.count_encoders) {
+			conn.encoders_ptr = VOID2U64(calloc(conn.count_encoders, sizeof(uint32_t)));
+		}
+
+		/*
 		conn.modes_ptr=(uint64_t)conn_mode_buf;
 		conn.props_ptr=(uint64_t)conn_prop_buf;
 		conn.prop_values_ptr=(uint64_t)conn_propval_buf;
 		conn.encoders_ptr=(uint64_t)conn_enc_buf;
-
+		*/
 
 		//get connector resources
 		if (ioctl(dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
@@ -209,10 +228,11 @@ int main()
 		//Check if the connector is OK to use (connected to something)
 		if (conn.count_encoders<1 || conn.count_modes<1 || !conn.encoder_id || !conn.connection)
 		{
-			printf("Not connected\n");
+			printf("This connector NOT connected\n");
+
+			//skip rest of loop, continuing to try next connector
 			continue;
 		}
-
 
         //creating dumb buffer
 		struct drm_mode_create_dumb create_dumb={0};
@@ -246,7 +266,6 @@ int main()
 		fb_w[i]=create_dumb.width;
 		fb_h[i]=create_dumb.height;
 
-
         //kernel mode
 		printf("%d : mode: %d, prop: %d, enc: %d\n",conn.connection,conn.count_modes,conn.count_props,conn.count_encoders);
 		printf("modes: %dx%d FB: %d\n",conn_mode_buf[0].hdisplay,conn_mode_buf[0].vdisplay,fb_base[i]);
@@ -269,7 +288,7 @@ int main()
 		ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc);
 	}
 
-	//Stop being the "master" of the DRI device
+	//Stop being the "master" of the DRI device - DROP MASTER
 	ioctl(dri_fd, DRM_IOCTL_DROP_MASTER, 0);
 
 	int x,y;
