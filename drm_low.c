@@ -172,7 +172,7 @@ int main()
 		char name[DRM_DISPLAY_MODE_LEN];
 	};*/
 
-
+	int found_connected = 0;
 	//Loop though all available connectors
 	for (i = 0; i < res.count_connectors; i++)
 	{
@@ -243,9 +243,43 @@ int main()
 				printf("This connections connection field came back empty\n");
 
 			printf("CONCLUSION: this connector NOT connected\n");
+
 			//skip rest of loop, continuing to try next connector
 			continue;
 		}
+
+		found_connected = 1;
+
+		/*FOR REFERENCE
+		struct drm_mode_create_dumb {
+			__u32 height;
+			__u32 width;
+			__u32 bpp;
+			__u32 flags;
+
+			__u32 handle;
+			__u32 pitch;
+			__u64 size;
+
+		};
+
+		struct drm_mode_fb_cmd {
+			__u32 fb_id;
+			__u32 width, height;
+			__u32 pitch;
+			__u32 bpp;
+			__u32 depth;
+			// driver specific handle 
+			__u32 handle;
+		};
+
+		struct drm_mode_map_dumb {
+			__u32 handle;
+			__u32 pad;
+
+			__u64 offset;
+		};*/
+
 
         //creating dumb buffer
 		struct drm_mode_create_dumb create_dumb={0};
@@ -254,15 +288,25 @@ int main()
 
 		//If we create the buffer later, we can get the size of the screen first.
 		//This must be a valid mode, so it's probably best to do this after we find
-		//a valid crtc with modes.
+		//a valid CRTC with modes.
+		/*
 		create_dumb.width = conn_mode_buf[0].hdisplay;
 		create_dumb.height = conn_mode_buf[0].vdisplay;
+		*/
+
+		create_dumb.width = ((struct drm_mode_modeinfo*)(U642VOID(conn.modes_ptr)))[0].hdisplay;
+		create_dumb.height = ((struct drm_mode_modeinfo*)(U642VOID(conn.modes_ptr)))[0].vdisplay;
 		create_dumb.bpp = 32;
 		create_dumb.flags = 0;
 		create_dumb.pitch = 0;
 		create_dumb.size = 0;
 		create_dumb.handle = 0;
-		ioctl(dri_fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_dumb);
+
+		//create the actual dumbbuffer with these characteristics
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_dumb) != 0) {
+			fprintf(stderr, "Drm mode create dumb failed with error %d: %m\n", errno);
+			return errno;
+		}
 
 		cmd_dumb.width=create_dumb.width;
 		cmd_dumb.height=create_dumb.height;
@@ -270,56 +314,108 @@ int main()
 		cmd_dumb.pitch=create_dumb.pitch;
 		cmd_dumb.depth=24;
 		cmd_dumb.handle=create_dumb.handle;
-		ioctl(dri_fd,DRM_IOCTL_MODE_ADDFB,&cmd_dumb);
 
-		map_dumb.handle=create_dumb.handle;
-		ioctl(dri_fd,DRM_IOCTL_MODE_MAP_DUMB,&map_dumb);
+		//tell the driver to add this dumb buffer as a framebuffer for the display
+		if (ioctl(dri_fd,DRM_IOCTL_MODE_ADDFB,&cmd_dumb) != 0) {
+			fprintf(stderr, "Drm mode addfb failed with error %d: %m\n", errno);
+			return errno;
+		}
 
+
+		map_dumb.handle = create_dumb.handle;
+
+		if (ioctl(dri_fd,DRM_IOCTL_MODE_MAP_DUMB,&map_dumb) !=0) {
+			fprintf(stderr, "Drm mode map dumb failed with error %d: %m\n", errno);
+			return errno;
+		}
+
+		//map some memory for the framebuffer
 		fb_base[i] = mmap(0, create_dumb.size, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset);
 		fb_w[i]=create_dumb.width;
 		fb_h[i]=create_dumb.height;
 
         //kernel mode
-		printf("%d : mode: %d, prop: %d, enc: %d\n",conn.connection,conn.count_modes,conn.count_props,conn.count_encoders);
-		printf("modes: %dx%d FB: %d\n",conn_mode_buf[0].hdisplay,conn_mode_buf[0].vdisplay,fb_base[i]);
+		printf("%d : Mode: %d, Prop: %d, Enc: %d\n",conn.connection, conn.count_modes, conn.count_props, conn.count_encoders);
+
+
+		printf("Modes: %d x %d FB: %d\n", conn_mode_buf[0].hdisplay, conn_mode_buf[0].vdisplay, fb_base[i]);
 
 		struct drm_mode_get_encoder enc={0};
 
-		enc.encoder_id=conn.encoder_id;
-		ioctl(dri_fd, DRM_IOCTL_MODE_GETENCODER, &enc);	//get encoder
+		enc.encoder_id = conn.encoder_id;
+
+		//get the encoder from this connector
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_GETENCODER, &enc) != 0) {
+			fprintf(stderr, "Drm mode getencoder failed with error %d: %m\n", errno);
+			return errno;
+		}
 
 		struct drm_mode_crtc crtc={0};
 
 		crtc.crtc_id=enc.crtc_id;
-		ioctl(dri_fd, DRM_IOCTL_MODE_GETCRTC, &crtc);
+
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_GETCRTC, &crtc) !=0) {
+			fprintf(stderr, "Drm mode get CRTC failed with error %d: %m\n", errno);
+			return errno;
+		}
 
 		crtc.fb_id=cmd_dumb.fb_id;
 		crtc.set_connectors_ptr=(uint64_t)&res_conn_buf[i];
 		crtc.count_connectors=1;
 		crtc.mode=conn_mode_buf[0];
 		crtc.mode_valid=1;
-		ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc);
+
+
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
+			fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
+			return errno;
+		}
+	}
+
+	//PROBLEM
+	if (!found_connected) {
+		fprintf(stderr, "ERROR: No connected connectors found\n");
+		return -1;
 	}
 
 	//Stop being the "master" of the DRI device - DROP MASTER
-	ioctl(dri_fd, DRM_IOCTL_DROP_MASTER, 0);
+	if (ioctl(dri_fd, DRM_IOCTL_DROP_MASTER, 0) !=0) {
+		fprintf(stderr, "Drm drop master failed with error %d: %m\n", errno);
+		return errno;
+	}
+	printf("Drm drop master success\n");
 
-	int x,y;
-	for (i=0;i<100;i++)
+	//iterators
+	int x, y;
+
+	for (i = 0; i < 100; i++)
 	{
 		int j;
-		for (j=0;j<res.count_connectors;j++)
+
+		//iterate over all connectors
+		for (j = 0; j < res.count_connectors; j++)
 		{
-			int col=(rand()%0x00ffffff)&0x00ff00ff;
-			for (y=0;y<fb_h[j];y++)
-				for (x=0;x<fb_w[j];x++)
+			//select random color
+			int col = (rand() % 0x00ffffff) & 0x00ff00ff;
+
+			//for all rows of pixels
+			for (y = 0; y < fb_h[j]; y++)
+
+				//for all pixels in the row
+				for (x = 0; x < fb_w[j]; x++)
 				{
-					int location=y*(fb_w[j]) + x;
-					*(((uint32_t*)fb_base[j])+location)=col;
+					//calculate offset into framebuffer memory for this pixel
+					int location = y * (fb_w[j]) + x;
+
+					//set this pixel to the color
+					*(((uint32_t*)fb_base[j]) + location) = col;
 				}
 		}
+
+		//sleep for 100k microseconds = 0.1 sec = 100ms
 		usleep(100000);
 	}
 
+	printf("DONE\n");
 	return 0;
 }
