@@ -49,6 +49,12 @@ struct drm_mode_card_res {
 
 int main()
 {
+	//kill hwcomposer process so we can get drm master
+	system("stop vendor.hwcomposer-2-3");
+
+	//guarantee shutdown and closure of dev file
+	usleep(100000);
+
     //open up the dri device
     int dri_fd  = open("/dev/dri/card0",O_RDWR | O_CLOEXEC);
     if (dri_fd<0) {
@@ -68,7 +74,8 @@ int main()
 
 	//Become the "master" of the DRI device
 	if (ioctl(dri_fd, DRM_IOCTL_SET_MASTER, 0)!=0) {
-        fprintf(stderr,)
+        fprintf(stderr, "Drm set master failed with eror %d: %m\n", errno);
+		return errno;
     }
 
 	//Get resource counts
