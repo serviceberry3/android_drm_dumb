@@ -55,6 +55,8 @@ struct drm_mode_card_res {
 
 int main()
 {
+	uint32_t valid_connector;
+
 	//kill hwcomposer process so we can get drm master
 	system("stop vendor.hwcomposer-2-3");
 
@@ -133,10 +135,10 @@ int main()
 	void* fb_base[10];
 
 	//array to store lengths of all framebuffers
-	long fb_w[10];
+	uint32_t fb_w[10];
 
 	//array to store widths of all framebuffer
-	long fb_h[10];
+	uint32_t fb_h[10];
 
 	int i;
 
@@ -251,6 +253,8 @@ int main()
 		}	
 
 		printf("FOUND a connected connector\n");
+		valid_connector = i;
+
 		found_connected = 1;
 
 		/*FOR REFERENCE
@@ -284,7 +288,6 @@ int main()
 			__u64 offset;
 		};*/
 
-
         //creating dumb buffer
 		struct drm_mode_create_dumb create_dumb={0};
 		struct drm_mode_map_dumb map_dumb={0};
@@ -302,6 +305,7 @@ int main()
 		//get the width and height the dumb buffer should be
 		create_dumb.width = ((struct drm_mode_modeinfo*)(U642VOID(conn.modes_ptr)))[0].hdisplay;
 		create_dumb.height = ((struct drm_mode_modeinfo*)(U642VOID(conn.modes_ptr)))[0].vdisplay;
+
 		printf("create_dumb.width is %d, create_dumb.height is %d\n", create_dumb.width, create_dumb.height);
 
 		create_dumb.bpp = 32;
@@ -341,6 +345,9 @@ int main()
 
 		//map some memory for the framebuffer, store the pointer to it in the framebuffer pointers array
 		fb_base[i] = mmap(0, create_dumb.size, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset);
+
+
+		printf("CHECK #2: create_dumb.width is %d, create_dumb.height is %d\n", create_dumb.width, create_dumb.height);
 
 		//store width and height of the buffer in the framebuffer widths and heights arrays
 		fb_w[i] = create_dumb.width;
@@ -457,36 +464,42 @@ int main()
 		//iterate over all connectors
 		for (j = 0; j < res.count_connectors; j++)
 		{
-			printf("Coloring for connector #%d\n", j);
+			if (j!=valid_connector)
+				continue;
+
+			//printf("Coloring for connector #%d\n", j);
 			//select random color
 
-			printf("Selecting color...\n");
+			//printf("Selecting color...\n");
 			int col = (rand() % 0x00ffffff) & 0x00ff00ff;
 
 			//for all rows of pixels
-			printf("Color selection done, starting coloring double-loop...\n");
+			//printf("Color selection done, starting coloring double-loop...\n");
+
+			//printf("fb_h[j] reads %d\n", fb_h[j]);
+
 			for (y = 0; y < fb_h[j]; y++) {
 
 				//for all pixels in the row
 				for (x = 0; x < fb_w[j]; x++)
 				{
-					printf("Calculating pixel location\n");
+					//printf("Calculating pixel location\n");
 					//calculate offset into framebuffer memory for this pixel
 					int location = (y * (fb_w[j])) + x;
 
-					printf("Setting pixel to color...\n");
+					//printf("Setting pixel to color...\n");
 					//set this pixel to the color
 					*(((uint32_t*) fb_base[j]) + location) = col;
 				}
 			}
 
-			printf("Connector #%d done\n", j);
+			//printf("Connector #%d done\n", j);
 		}
 
 		//sleep for 100k microseconds = 0.1 sec = 100ms between each color
-		//usleep(100000);
+		usleep(1000000);
 
-		printf("Color #%d done\n", i);
+		//printf("Color #%d done\n", i);
 	}
 
 	printf("DONE\n");
