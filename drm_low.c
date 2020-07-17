@@ -200,15 +200,24 @@ int main()
 			//TODO: add malloc check
 			conn.prop_values_ptr = VOID2U64(calloc(conn.count_props, sizeof(uint64_t)));
 		}
+		else {
+			printf("This connector props count is 0\n");
+		}
 
 		if (conn.count_modes) {
 			conn.modes_ptr = VOID2U64(calloc(conn.count_modes, sizeof(struct drm_mode_modeinfo)));
 		}
 		//TODO: add else check??
+		else {
+			printf("This connector modes count is 0\n");
+		}
 
 	
 		if (conn.count_encoders) {
 			conn.encoders_ptr = VOID2U64(calloc(conn.count_encoders, sizeof(uint32_t)));
+		}
+		else {
+			printf("This connector encoders count is 0\n");
 		}
 
 		/*
@@ -218,7 +227,7 @@ int main()
 		conn.encoders_ptr=(uint64_t)conn_enc_buf;
 		*/
 
-		//get connector resources
+		//get actual connector resources
 		if (ioctl(dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
 			fprintf(stderr, "Drm mode getconnector second failed with error %d: %m\n", errno);
 			return errno;
@@ -226,10 +235,14 @@ int main()
 		printf("Drm get connector second success\n");
 
 		//Check if the connector is OK to use (connected to something)
-		if (conn.count_encoders<1 || conn.count_modes<1 || !conn.encoder_id || !conn.connection)
+		if (conn.count_encoders<1 || conn.count_modes<1 || !conn.encoder_id || !conn.connection) //REDUNDANT
 		{
-			printf("This connector NOT connected\n");
+			if (!conn.encoder_id)
+				printf("This connections encoder_id field came back empty\n");
+			else if (!conn.connection) 
+				printf("This connections connection field came back empty\n");
 
+			printf("CONCLUSION: this connector NOT connected\n");
 			//skip rest of loop, continuing to try next connector
 			continue;
 		}
