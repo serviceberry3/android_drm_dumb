@@ -13,6 +13,9 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <inttypes.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+
 
 #define VOID2U64(x) ((uint64_t)(unsigned long)(x))
 #define U642VOID(x) ((void *)(unsigned long)(x))
@@ -60,8 +63,13 @@ int main()
 	//kill hwcomposer process so we can get drm master
 	system("stop vendor.hwcomposer-2-3");
 
-	//guarantee shutdown and closure of dev file
-	usleep(100000);
+	printk("Welcome to drm_low, by Noah Weiner 2020\n");
+
+	//if Xorg is our display server, kill that
+	//system("sudo service gdm3 stop");
+
+	//guarantee shutdown and closure of dev file by waiting 1 sec
+	usleep(1000000);
 
     //open up the dri device
     int dri_fd  = open("/dev/dri/card0",O_RDWR | O_CLOEXEC);
