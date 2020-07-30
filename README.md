@@ -3,3 +3,5 @@ This program shuts down Android's native display server (the hwcomposer process)
 I know you need to be running as root to run this on a normal Linux machine, and I think you also do when running it on Android, so you'll need a rooted device. 
 
 To run on a Linux machine, you'll first want to run something like "sudo service gdm3 stop" to shut down Xorg, then switch to a different TTY and run drm_low.c.
+
+UPDATE (07/18/20): running on Android devices does require a kernel patch in order to access the encoder. I'm working on it but won't be able to get around to posting it for another week or so.
