@@ -9,12 +9,14 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <errno.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <inttypes.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <string.h>
 
 
 #define VOID2U64(x) ((uint64_t)(unsigned long)(x))
@@ -56,6 +58,25 @@ struct drm_mode_card_res {
 	__u32 min_height, max_height;
 };*/
 
+int drmGetCap(int fd, uint64_t capability, uint64_t* value)
+{ 
+    struct drm_get_cap cap;
+    int ret;
+
+    //memclear(cap);
+    cap.capability = capability;
+
+    ret = ioctl(fd, DRM_IOCTL_GET_CAP, &cap);
+    if (ret!=0)
+        return ret;
+
+    *value = cap.value;
+    return 0;
+}
+
+int which_buf = 0;
+
+
 int main()
 {
 	uint32_t valid_connector;
@@ -63,16 +84,16 @@ int main()
 	//kill hwcomposer process so we can get drm master
 	system("stop vendor.hwcomposer-2-3");
 
-	printk("Welcome to drm_low, by Noah Weiner 2020\n");
+	//printk("Welcome to drm_low, by Noah Weiner 2020\n");
 
 	//if Xorg is our display server, kill that
 	//system("sudo service gdm3 stop");
 
 	//guarantee shutdown and closure of dev file by waiting 1 sec
-	usleep(1000000);
+	usleep(100000);
 
     //open up the dri device
-    int dri_fd  = open("/dev/dri/card0",O_RDWR | O_CLOEXEC);
+    int dri_fd  = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (dri_fd<0) {
         fprintf(stderr, "FAIL on open dev/dri/card0\n");
         return -1;
@@ -85,7 +106,7 @@ int main()
 	uint64_t res_fb_buf[10]={0}, res_crtc_buf[10]={0}, res_conn_buf[10]={0}, res_enc_buf[10]={0};
 
     //instantiate a drm_mode_card_res struct 
-	struct drm_mode_card_res res={0};
+	struct drm_mode_card_res res = {0};
 
 	//Become the "master" of the DRI device
 	if (ioctl(dri_fd, DRM_IOCTL_SET_MASTER, 0)!=0) {
@@ -97,12 +118,13 @@ int main()
 
 	//Get resource counts: this fills in count_fbs, count_crtcs, count_connectors, count_encoders
 	if (ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res)!=0) {
-		fprintf(stderr, "Drm mode getresources failed with eror %d: %m\n", errno);
+		fprintf(stderr, "Drm mode getresources failed with error %d: %m\n", errno);
 		return errno;
 	}
 	printf("Drm get resources success\n");
 
 
+	//allocate memory for buffers containing IDs of the resources
 	if (res.count_fbs) {
 		res.fb_id_ptr = VOID2U64(calloc(res.count_fbs, sizeof(uint32_t)));
 	}
@@ -117,6 +139,18 @@ int main()
 	}
 
 
+	//let's check the capabilities of this DRM device to see if it supports DRM dumb buffers
+	uint64_t has_dumb;
+
+	if (drmGetCap(dri_fd, DRM_CAP_DUMB_BUFFER, &has_dumb) < 0 || !has_dumb) {
+		fprintf(stderr, "DRM device does NOT support dumb buffers\n");
+		close(dri_fd);
+		return -EOPNOTSUPP;
+	}
+
+	printf("Drm device supports dumb buffers\n");
+
+
 	/*
 	//set the id array heads to the ones we created (10 uint64_ts allocated on the stack)
 	res.fb_id_ptr = (uint64_t)res_fb_buf;
@@ -125,7 +159,7 @@ int main()
 	res.encoder_id_ptr = (uint64_t)res_enc_buf;
 	*/
 
-	//Get resource IDs
+	//Get resource IDs by calling get resources a second time
 	if (ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res)!=0) {
 		fprintf(stderr, "Drm mode getresources second failed with error %d: %m\n", errno);
 		return errno;
@@ -140,13 +174,14 @@ int main()
 	printf("# framebuffs: %d, # CRTCs: %d, # connectors: %d, # encoders: %d\n", res.count_fbs, res.count_crtcs, res.count_connectors, res.count_encoders);
 
 	//array of actual pointers to starts of framebuffers in memory
-	void* fb_base[10];
+	//each connector could have two dumb buffers for pageflipping, hence the 2d array
+	void* fb_base[10][2];
 
 	//array to store lengths of all framebuffers
-	uint32_t fb_w[10];
+	uint32_t fb_w[10][2];
 
 	//array to store widths of all framebuffer
-	uint32_t fb_h[10];
+	uint32_t fb_h[10][2];
 
 	int i;
 
@@ -184,16 +219,23 @@ int main()
 	};*/
 
 	int found_connected = 0;
+	struct drm_mode_crtc crtc = {0};
+	struct drm_mode_fb_cmd cmd_dumb = {0};
+	struct drm_mode_fb_cmd cmd_dumb2 = {0};
 
 	//Loop though all available connectors
 	for (i = 0; i < res.count_connectors; i++)
 	{
+		//instantiate an array of some drm_mode_modeinfo structs to hold the list of modes for this connector
 		struct drm_mode_modeinfo conn_mode_buf[20]={0};
 
+		//arrays to hold the connection properties, conection property values, and encoder IDs for this connector
 		uint64_t conn_prop_buf[20]={0}, conn_propval_buf[20]={0}, conn_enc_buf[20]={0};
 
+		//struct for getting the connector info
 		struct drm_mode_get_connector conn = {0};
 
+		//get the ID of the current connector we're looking at
 		printf("The pointer to the connector ID list is %p, our index is %d, we're looking at address %p\n", (uint64_t*)(U642VOID(res.connector_id_ptr)), i, &((uint64_t*)(U642VOID(res.connector_id_ptr)))[i]);
 		conn.connector_id = ((uint32_t*)(U642VOID(res.connector_id_ptr)))[i];
 
@@ -207,6 +249,7 @@ int main()
 		}
 		printf("Drm get connector success\n");
 
+		//allocate memories for connector properties and their values
 		if (conn.count_props) {
 			conn.props_ptr = VOID2U64(calloc(conn.count_props, sizeof(uint32_t)));
 			//TODO: add malloc check
@@ -216,6 +259,7 @@ int main()
 			printf("This connector props count is 0\n");
 		}
 
+		//allocate memory for connector modes list
 		if (conn.count_modes) {
 			conn.modes_ptr = VOID2U64(calloc(conn.count_modes, sizeof(struct drm_mode_modeinfo)));
 		}
@@ -224,7 +268,7 @@ int main()
 			printf("This connector modes count is 0\n");
 		}
 
-	
+		//allocate memory for connector encoders list (list of IDs)
 		if (conn.count_encoders) {
 			conn.encoders_ptr = VOID2U64(calloc(conn.count_encoders, sizeof(uint32_t)));
 		}
@@ -239,12 +283,22 @@ int main()
 		conn.encoders_ptr=(uint64_t)conn_enc_buf;
 		*/
 
+
 		//get actual connector resources
 		if (ioctl(dri_fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn)!=0) {
 			fprintf(stderr, "Drm mode getconnector second failed with error %d: %m\n", errno);
 			return errno;
 		}
 		printf("Drm get connector second success\n");
+
+
+/*
+		//we know we want to use connector 27 (DSI-1 connector), so override the ID because it was coming back as 0
+		if (i==0) {
+			conn.encoder_id = 27;
+			((uint32_t*)U642VOID(conn.encoders_ptr))[0] = 27;
+		}
+		*/
 
 		//Check if the connector is OK to use (connected to something)
 		if (conn.count_encoders<1 || conn.count_modes<1 || !conn.encoder_id || !conn.connection) //REDUNDANT
@@ -256,7 +310,7 @@ int main()
 
 			printf("CONCLUSION: this connector NOT connected\n");
 
-			//skip rest of loop, continuing to try next connector
+			//this connector not connected, so skip rest of loop, continuing to try next connector
 			continue;
 		}	
 
@@ -297,9 +351,13 @@ int main()
 		};*/
 
         //creating dumb buffer
-		struct drm_mode_create_dumb create_dumb={0};
-		struct drm_mode_map_dumb map_dumb={0};
-		struct drm_mode_fb_cmd cmd_dumb={0};
+		struct drm_mode_create_dumb create_dumb = {0};
+		struct drm_mode_map_dumb map_dumb = {0};
+		//struct drm_mode_fb_cmd cmd_dumb = {0};
+
+		memset(&create_dumb, 0, sizeof(create_dumb));
+		memset(&cmd_dumb, 0, sizeof(cmd_dumb));
+		memset(&map_dumb, 0, sizeof(map_dumb));
 
 		//If we create the buffer later, we can get the size of the screen first.
 		//This must be a valid mode, so it's probably best to do this after we find
@@ -337,7 +395,7 @@ int main()
 		cmd_dumb.handle = create_dumb.handle;
 
 		//tell the driver to add this dumb buffer as a framebuffer for the display
-		if (ioctl(dri_fd,DRM_IOCTL_MODE_ADDFB, &cmd_dumb) != 0) {
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_ADDFB, &cmd_dumb) != 0) {
 			fprintf(stderr, "Drm mode addfb failed with error %d: %m\n", errno);
 			return errno;
 		}
@@ -345,21 +403,132 @@ int main()
 
 		map_dumb.handle = create_dumb.handle;
 
-		if (ioctl(dri_fd,DRM_IOCTL_MODE_MAP_DUMB,&map_dumb) !=0) {
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_MAP_DUMB, &map_dumb) !=0) {
 			fprintf(stderr, "Drm mode map dumb failed with error %d: %m\n", errno);
 			return errno;
 		}
 		printf("IOCTL_MODE_MAP_DUMB success\n");
 
 		//map some memory for the framebuffer, store the pointer to it in the framebuffer pointers array
-		fb_base[i] = mmap(0, create_dumb.size, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset);
+		printf("Mapping actual memory using mmap64, requesting %lld bytes, offset is %lld...\n", create_dumb.size, map_dumb.offset);
 
+		//print out size requested with different formatter to verify
+		printf("create_dumb.size again: ");
+		printf("%" PRId64 "\n", create_dumb.size);
+
+
+		fb_base[i][0] = (void*)mmap(0, (size_t)create_dumb.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset); //2462400 * 4?
+
+		if (fb_base[i][0] == MAP_FAILED) {
+			fprintf(stderr, "Mmap call failed with error %d: %m\n", errno);
+			return errno;
+		}
+
+		printf("mmap64 sucess\n");
+
+		memset(fb_base[i][0], 0, create_dumb.size);
 
 		printf("CHECK #2: create_dumb.width is %d, create_dumb.height is %d\n", create_dumb.width, create_dumb.height);
 
 		//store width and height of the buffer in the framebuffer widths and heights arrays
-		fb_w[i] = create_dumb.width;
-		fb_h[i] = create_dumb.height;
+		fb_w[i][0] = create_dumb.width;
+		fb_h[i][0] = create_dumb.height;
+
+
+		//MAKE SECOND DUMB BUFFER*****************************************************
+
+		//creating dumb buffer
+		struct drm_mode_create_dumb create_dumb2 = {0};
+		struct drm_mode_map_dumb map_dumb2 = {0};
+		//struct drm_mode_fb_cmd cmd_dumb2 = {0};
+
+		memset(&create_dumb2, 0, sizeof(create_dumb));
+		memset(&cmd_dumb2, 0, sizeof(cmd_dumb));
+		memset(&map_dumb2, 0, sizeof(map_dumb));
+
+		//If we create the buffer later, we can get the size of the screen first.
+		//This must be a valid mode, so it's probably best to do this after we find
+		//a valid CRTC with modes.
+
+		/*
+		create_dumb.width = conn_mode_buf[0].hdisplay;
+		create_dumb.height = conn_mode_buf[0].vdisplay;
+		*/
+
+		//get the width and height the dumb buffer should be
+		create_dumb2.width = ((struct drm_mode_modeinfo*)(U642VOID(conn.modes_ptr)))[0].hdisplay;
+		create_dumb2.height = ((struct drm_mode_modeinfo*)(U642VOID(conn.modes_ptr)))[0].vdisplay;
+
+		printf("create_dumb2.width is %d, create_dumb.height2 is %d\n", create_dumb2.width, create_dumb2.height);
+
+		create_dumb2.bpp = 32;
+		create_dumb2.flags = 0;
+		create_dumb2.pitch = 0;
+		create_dumb2.size = 0;
+		create_dumb2.handle = 0;
+
+		//create the actual dumbbuffer with these characteristics
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_dumb2) != 0) {
+			fprintf(stderr, "Drm mode create dumb2 failed with error %d: %m\n", errno);
+			return errno;
+		}
+		printf("IOCTL_MODE_CREATE_DUMB2 success\n");
+
+		cmd_dumb2.width = create_dumb2.width;
+		cmd_dumb2.height = create_dumb2.height;
+		cmd_dumb2.bpp = create_dumb2.bpp;
+		cmd_dumb2.pitch = create_dumb2.pitch;
+		cmd_dumb2.depth = 24;
+		cmd_dumb2.handle = create_dumb2.handle;
+
+		//tell the driver to add this dumb buffer as a framebuffer for the display
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_ADDFB, &cmd_dumb2) != 0) {
+			fprintf(stderr, "Drm mode addfb2 failed with error %d: %m\n", errno);
+			return errno;
+		}
+		printf("IOCTL_MODE_ADDFB2 success\n");
+
+		map_dumb2.handle = create_dumb2.handle;
+
+		if (ioctl(dri_fd, DRM_IOCTL_MODE_MAP_DUMB, &map_dumb2) !=0) {
+			fprintf(stderr, "Drm mode map dumb2 failed with error %d: %m\n", errno);
+			return errno;
+		}
+		printf("IOCTL_MODE_MAP_DUMB2 success\n");
+
+		//map some memory for the framebuffer, store the pointer to it in the framebuffer pointers array
+		printf("Mapping actual memory 2 using mmap64, requesting %lld bytes, offset is %lld...\n", create_dumb2.size, map_dumb2.offset);
+
+		//print out size requested with different formatter to verify
+		printf("create_dum2b.size again: ");
+		printf("%" PRId64 "\n", create_dumb2.size);
+
+
+		fb_base[i][1] = (void*)mmap(0, (size_t)create_dumb2.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb2.offset); //2462400 * 4?
+
+		if (fb_base[i][1] == MAP_FAILED) {
+			fprintf(stderr, "Mmap call 2 failed with error %d: %m\n", errno);
+			return errno;
+		}
+
+		printf("mmap64 2 sucess\n");
+
+		memset(fb_base[i][1], 0, create_dumb2.size);
+
+		printf("CHECK #2: create_dumb2.width is %d, create_dumb.height is %d\n", create_dumb2.width, create_dumb2.height);
+
+		//store width and height of the buffer in the framebuffer widths and heights arrays
+		fb_w[i][1] = create_dumb.width;
+		fb_h[i][1] = create_dumb.height;
+
+
+
+
+
+
+
+		//SET UP ENCODER AND CRTC
+
 
         //kernel mode
 		printf("Connection #%d: # modes: %d, # props: %d, # encoders: %d\n", conn.connection, conn.count_modes, conn.count_props, conn.count_encoders);
@@ -407,10 +576,11 @@ int main()
 			struct drm_mode_modeinfo mode;
 		};*/
 
-		struct drm_mode_crtc crtc={0};
+		//struct drm_mode_crtc crtc = {0};
 
 		//already should have the ID number of the CRTC for this encoder
 		crtc.crtc_id = enc.crtc_id;
+		//crtc.crtc_id = 127;  //127-0 or 181-1?
 		printf("Already have the CRTC ID for this encoder, which is %d\n", crtc.crtc_id);
 
 		//get more info about the CRTC for this encoder, filling in the drm_mode_crtc struct 
@@ -448,7 +618,8 @@ int main()
 
 	//PROBLEM
 	if (!found_connected) {
-		fprintf(stderr, "ERROR: No connected connectors found\n");
+		printf("No connected connectors found\n");
+		//fprintf(stderr, "ERROR: No connected connectors found\n");
 		return -1;
 	}
 
@@ -465,9 +636,11 @@ int main()
 	int x, y;
 
 	printf("Starting iterations for writing to FB...\n");
-	for (i = 0; i < 100; i++)
+	for (i = 0; i < 10; i++)
 	{
 		int j;
+		void* current_page;
+
 
 		//iterate over all connectors
 		for (j = 0; j < res.count_connectors; j++)
@@ -475,41 +648,79 @@ int main()
 			if (j!=valid_connector)
 				continue;
 
-			//printf("Coloring for connector #%d\n", j);
+			if (which_buf) {
+				current_page = fb_base[j][0];
+			}
+			else {
+				current_page = fb_base[j][1];
+			}
+
+			printf("Coloring for connector #%d\n", j);
 			//select random color
 
-			//printf("Selecting color...\n");
+			printf("Selecting color...\n");
 			int col = (rand() % 0x00ffffff) & 0x00ff00ff;
+			printf("Color is %d\n", col);
+
+			//int col = 0xffffff00;
 
 			//for all rows of pixels
-			//printf("Color selection done, starting coloring double-loop...\n");
+			printf("Color selection done, starting coloring double-loop...\n");
 
-			//printf("fb_h[j] reads %d\n", fb_h[j]);
+			printf("fb_h[j] reads %d, fb_w[j] read %d\n", fb_h[j][0], fb_w[j][0]);
 
-			for (y = 0; y < fb_h[j]; y++) {
-
+			for (y = 0; y < fb_h[j][0]; y++) {
+			/*
+				if (y%20==0) {
+						col = 0x00ff00ff;
+					}
+				else {
+					col = 0xffffffff;
+				}
+				*/
+			
+				//printf("Row number %d\n", y);
 				//for all pixels in the row
-				for (x = 0; x < fb_w[j]; x++)
+				for (x = 0; x < fb_w[j][0]; x++)
 				{
-					//printf("Calculating pixel location\n");
+					//printf("Calculating pixel location, column number %d\n", x);
 					//calculate offset into framebuffer memory for this pixel
-					int location = (y * (fb_w[j])) + x;
+					int location = (y * (fb_w[j][0])) + x;
 
 					//printf("Setting pixel to color...\n");
 					//set this pixel to the color
-					*(((uint32_t*) fb_base[j]) + location) = col;
+					*(((uint32_t*) current_page) + location) = col;
 				}
 			}
 
-			//printf("Connector #%d done\n", j);
-		}
+			if (which_buf) {
+				crtc.fb_id = cmd_dumb.fb_id;
+				which_buf = 0;
+			}
+			else {
+				crtc.fb_id = cmd_dumb2.fb_id;
+				which_buf = 1;
+			}
+
+			//Connect the CRTC to the correct page (back page)
+			if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
+				fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
+				return errno;
+			}
+			printf("IOCTL_MODE_SETCRTC success\n");
+				
+
+			printf("Connector #%d done\n", j);
+
+			}
 
 		//sleep for 100k microseconds = 0.1 sec = 100ms between each color
 		usleep(1000000);
 
-		//printf("Color #%d done\n", i);
+		printf("Color #%d done\n", i);
 	}
 
 	printf("DONE\n");
+	close(dri_fd);
 	return 0;
 }
