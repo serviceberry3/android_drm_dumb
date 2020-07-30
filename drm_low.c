@@ -292,13 +292,13 @@ int main()
 		printf("Drm get connector second success\n");
 
 
-/*
+
 		//we know we want to use connector 27 (DSI-1 connector), so override the ID because it was coming back as 0
 		if (i==0) {
 			conn.encoder_id = 27;
 			((uint32_t*)U642VOID(conn.encoders_ptr))[0] = 27;
 		}
-		*/
+		
 
 		//Check if the connector is OK to use (connected to something)
 		if (conn.count_encoders<1 || conn.count_modes<1 || !conn.encoder_id || !conn.connection) //REDUNDANT
@@ -417,7 +417,7 @@ int main()
 		printf("%" PRId64 "\n", create_dumb.size);
 
 
-		fb_base[i][0] = (void*)mmap(0, (size_t)create_dumb.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset); //2462400 * 4?
+		fb_base[i][0] = (void*)mmap64(0, (size_t)create_dumb.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset); //2462400 * 4?
 
 		if (fb_base[i][0] == MAP_FAILED) {
 			fprintf(stderr, "Mmap call failed with error %d: %m\n", errno);
@@ -504,7 +504,7 @@ int main()
 		printf("%" PRId64 "\n", create_dumb2.size);
 
 
-		fb_base[i][1] = (void*)mmap(0, (size_t)create_dumb2.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb2.offset); //2462400 * 4?
+		fb_base[i][1] = (void*)mmap64(0, (size_t)create_dumb2.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb2.offset); //2462400 * 4?
 
 		if (fb_base[i][1] == MAP_FAILED) {
 			fprintf(stderr, "Mmap call 2 failed with error %d: %m\n", errno);
@@ -579,8 +579,8 @@ int main()
 		//struct drm_mode_crtc crtc = {0};
 
 		//already should have the ID number of the CRTC for this encoder
-		crtc.crtc_id = enc.crtc_id;
-		//crtc.crtc_id = 127;  //127-0 or 181-1?
+		//crtc.crtc_id = enc.crtc_id;
+		crtc.crtc_id = 127;  //127-0 or 181-1?
 		printf("Already have the CRTC ID for this encoder, which is %d\n", crtc.crtc_id);
 
 		//get more info about the CRTC for this encoder, filling in the drm_mode_crtc struct 
@@ -636,7 +636,7 @@ int main()
 	int x, y;
 
 	printf("Starting iterations for writing to FB...\n");
-	for (i = 0; i < 10; i++)
+	for (i = 0; i < 50; i++)
 	{
 		int j;
 		void* current_page;
