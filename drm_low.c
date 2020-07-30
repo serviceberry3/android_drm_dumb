@@ -636,7 +636,7 @@ int main()
 	int x, y;
 
 	printf("Starting iterations for writing to FB...\n");
-	for (i = 0; i < 50; i++)
+	for (i = 0; i < 100; i++)
 	{
 		int j;
 		void* current_page;
