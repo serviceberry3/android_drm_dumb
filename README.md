@@ -6,7 +6,7 @@ To run on a Linux machine, you'll first want to run something like "sudo service
 
 UPDATE (07/18/20): running on Android devices does require a kernel patch in order to access the encoder. I'm working on it but won't be able to get around to posting it for another week or so.
 
-UPDATE (07/30/20): the program is now finished; everything's working. A kernel mod could do the job, but an easier way is to just do some debugging of the DRM driver using printk, or, even easier, use the modetest tool. Specifically, you need to find out what the correct encoder ID and corresponding CRTC ID are for DSI-1. (You'll see this as on of the encoder types in the modetest output.) For the Pixel, my encoder was 27, and the corresponding CRTC was 127. It seems like the latest versions of Android 10 for the Pixel 4 come with libdrm in /external; to build the modetest executable, set up the AOSP build normally (using lunch, etc.), then cd into /external/libdrm/tests/modetest and run 'mma'. When the build finishes it should tell you where it stored the output executable; mine was in /home/nodog/Documents/aosp2/working/out/target/product/flame/data/nativetest/modetest. Push the executable to /system/bin on the Pixel device, then cd into bin and run ./modetest -M msm_drm.  
+UPDATE (07/30/20): the program is now finished; everything's working. A kernel mod could do the job, but an easier way is to just do some debugging of the DRM driver using printk, or, even easier, use the modetest tool. Specifically, you need to find out what the correct encoder ID and corresponding CRTC ID are for DSI-1. (You'll see this as one of the encoder types in the modetest output.) For the Pixel, my encoder was 27, and the corresponding CRTC was 127. It seems like the latest versions of Android 10 for the Pixel 4 come with libdrm in /external; to build the modetest executable, set up the AOSP build normally (using lunch, etc.), then cd into /external/libdrm/tests/modetest and run 'mma'. When the build finishes it should tell you where it stored the output executable; mine was in /home/nodog/Documents/aosp2/working/out/target/product/flame/data/nativetest/modetest. Push the executable to /system/bin on the Pixel device, then cd into bin and run ./modetest -M msm_drm.  
 
 You should see at the very beginning the list of encoders; you want the ID corresponding to the DSI (Display Serial Interface) encoder. For some reason, after DRM_IOCTL_MODE_GETCONNECTOR, the encoder ID for the connector was coming up null (0), so you need to override it like I did in line 298. Similarly, after DRM_IOCTL_MODE_GETENCODER, the CRTC id for the encoder was coming back as 0, so override that like I did in line 583. Getting the correct CRTC ID from modetest is a little less certain, but I'm guessing it's always the first CRTC listed under the CRTC section.  
 
@@ -16,7 +16,9 @@ One thing to note is that, at least on the Pixel 4 with AOSP, the rendering won'
 
 I forgot to mention this before, but mmap64 is also required...some knowledgeable people tell me that has something to do with bionic?   
 
-To build the program, run something like arm-linux-gnueabi-gcc -static -march=armv7-a drm_low.c -o <desired executable name>     
+To build the program, run something like  
+
+arm-linux-gnueabi-gcc -static -march=armv7-a drm_low.c -o [desired executable name]     
 
 Then push the executable to the Android device. Don't forget, in order to push, you first need to open an ADB shell and run the following:  
 
