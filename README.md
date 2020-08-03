@@ -1,3 +1,5 @@
+Thanks to Rob Clark (Google/Red Hat), Sean Paul (Google), and John Stultz (Linaro) for helping me figure a couple things out.
+
 This program shuts down Android's native display server (the hwcomposer process) and writes pixels directly to the screen via DRM/KMS, which has replaced the Linux framebuffer device on new Android OS versions. So far, it's working on regular Linux machines that use Xorg as the display server, but I'm still working to get it up and running on Android devices (namely the Google Pixel 4). It might require a small kernel patch. (UPDATE: It works now!) The "dumb buffer" is what DRM allows users to create as a sort of substitute for the old fb0. It should draw random solid colors to the screen for 100 seconds, one color per second. There shouldn't be much tearing, because I imlemented double buffering, but it doesn't synchronize with VSYNC (although that's coming soon), and I'm guessing if you're trying to render faster, there might be tearing. 
 
 I know you need to be running as root to run this on a normal Linux machine, and I think you also do when running it on Android, so you'll need a rooted device. 
