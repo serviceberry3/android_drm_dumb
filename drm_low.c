@@ -580,7 +580,7 @@ int main()
 
 		//already should have the ID number of the CRTC for this encoder
 		//crtc.crtc_id = enc.crtc_id;
-		crtc.crtc_id = 127;  //127-0 or 181-1?
+		crtc.crtc_id = 125;  //127-0 or 181-1?
 		printf("Already have the CRTC ID for this encoder, which is %d\n", crtc.crtc_id);
 
 		//get more info about the CRTC for this encoder, filling in the drm_mode_crtc struct 
