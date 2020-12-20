@@ -18,31 +18,18 @@
 #include <linux/kernel.h>
 #include <string.h>
 
-
+//convenience macros for converting uint_64* to void* and vice versa
 #define VOID2U64(x) ((uint64_t)(unsigned long)(x))
 #define U642VOID(x) ((void *)(unsigned long)(x))
 
-/*
-int main (void) {
-    int dri_fd  = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-    printf("Open returned %d\n", dri_fd);
-    //printf("Set master request code: %d\n", DRM_IOCTL_SET_MASTER);
+//align a size_t by the page size of the system
+#define PGALIGN(x) ((x % getpagesize() != 0) ? (x + (getpagesize() - (x % getpagesize()))) : x)
 
 
-    //DOESN'T WORK
-    int ret = ioctl(dri_fd, DRM_IOCTL_SET_MASTER, 0);
-    //int ret = drmSetMaster(dri_fd);
+//function predeclarations
+int sequence_colors_fill_screen();
+int sequence_oscillate_square();
 
-    fprintf(stderr, "Set master failed with error %d: %m\n", ret, errno);
-
-    struct drm_mode_card_res res, counts;
-
-    int ret2 = ioctl(dri_fd, DRM_IOCTL_MODE_GETRESOURCES, &res);
-    fprintf(stderr, "Get resources failed with error %d: %m\n", ret2, errno);
-
-    //printf("Returned %d\n", ret);
-}
-*/
 
 /*for reference
 struct drm_mode_card_res {
@@ -74,12 +61,46 @@ int drmGetCap(int fd, uint64_t capability, uint64_t* value)
     return 0;
 }
 
+
+//array of actual pointers to starts of framebuffers in memory
+//each connector could have two dumb buffers for pageflipping, hence the 2d array
+void* fb_base[10][2];
+
+//buffer swapper for double buffering implementation
 int which_buf = 0;
 
+//the Direct Rendering Infrastructure device file descriptor
+int dri_fd;
+
+//array to store lengths of all framebuffers
+uint32_t fb_w[10][2];
+
+//array to store widths of all framebuffer
+uint32_t fb_h[10][2];
+
+//initialize some structs to NULL
+struct drm_mode_crtc crtc = {0};
+struct drm_mode_fb_cmd cmd_dumb = {0};
+struct drm_mode_fb_cmd cmd_dumb2 = {0};
+
+//instantiate a drm_mode_card_res struct 
+struct drm_mode_card_res res = {0};
+
+uint32_t valid_connector;
+
+//reusable iterator
+int i;
 
 int main()
 {
-	uint32_t valid_connector;
+	printf("Testing: %d %d %d\n", PGALIGN(245760), PGALIGN(245767), PGALIGN(39698437));
+
+	//return value. Let's HOPE it stays clean
+	int ret = 0;
+
+
+	//TODO: CLEAN UP ON PREMATURE RETURNS
+
 
 	//kill hwcomposer process so we can get drm master
 	system("stop vendor.hwcomposer-2-3");
@@ -93,7 +114,7 @@ int main()
 	usleep(100000);
 
     //open up the dri device
-    int dri_fd  = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+    dri_fd  = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (dri_fd<0) {
         fprintf(stderr, "FAIL on open dev/dri/card0\n");
         return -1;
@@ -104,9 +125,6 @@ int main()
     //kernel mode setting: set up integer arrays to store IDs of all the diff 4 types of resources
     //frambuffer, CRTC, connector, and encoder
 	uint64_t res_fb_buf[10]={0}, res_crtc_buf[10]={0}, res_conn_buf[10]={0}, res_enc_buf[10]={0};
-
-    //instantiate a drm_mode_card_res struct 
-	struct drm_mode_card_res res = {0};
 
 	//Become the "master" of the DRI device
 	if (ioctl(dri_fd, DRM_IOCTL_SET_MASTER, 0)!=0) {
@@ -173,17 +191,6 @@ int main()
 	//print out count information
 	printf("# framebuffs: %d, # CRTCs: %d, # connectors: %d, # encoders: %d\n", res.count_fbs, res.count_crtcs, res.count_connectors, res.count_encoders);
 
-	//array of actual pointers to starts of framebuffers in memory
-	//each connector could have two dumb buffers for pageflipping, hence the 2d array
-	void* fb_base[10][2];
-
-	//array to store lengths of all framebuffers
-	uint32_t fb_w[10][2];
-
-	//array to store widths of all framebuffer
-	uint32_t fb_h[10][2];
-
-	int i;
 
 	/*For reference
 	struct drm_mode_get_connector {
@@ -219,18 +226,15 @@ int main()
 	};*/
 
 	int found_connected = 0;
-	struct drm_mode_crtc crtc = {0};
-	struct drm_mode_fb_cmd cmd_dumb = {0};
-	struct drm_mode_fb_cmd cmd_dumb2 = {0};
 
 	//Loop though all available connectors
 	for (i = 0; i < res.count_connectors; i++)
 	{
 		//instantiate an array of some drm_mode_modeinfo structs to hold the list of modes for this connector
-		struct drm_mode_modeinfo conn_mode_buf[20]={0};
+		struct drm_mode_modeinfo conn_mode_buf[20] = {0};
 
 		//arrays to hold the connection properties, conection property values, and encoder IDs for this connector
-		uint64_t conn_prop_buf[20]={0}, conn_propval_buf[20]={0}, conn_enc_buf[20]={0};
+		uint64_t conn_prop_buf[20]={0}, conn_propval_buf[20] = {0}, conn_enc_buf[20] = {0};
 
 		//struct for getting the connector info
 		struct drm_mode_get_connector conn = {0};
@@ -293,8 +297,8 @@ int main()
 
 
 
-		//we know we want to use connector 27 (DSI-1 connector), so override the ID because it was coming back as 0
-		if (i==0) {
+		//we know we want to use connector 27 (DSI-1 connector), so OVERRIDE the ID because it was coming back as 0
+		if (i == 0) {
 			conn.encoder_id = 27;
 			((uint32_t*)U642VOID(conn.encoders_ptr))[0] = 27;
 		}
@@ -416,8 +420,15 @@ int main()
 		printf("create_dumb.size again: ");
 		printf("%" PRId64 "\n", create_dumb.size);
 
+		size_t calculated = (size_t)create_dumb.size * 4;
+		printf("Calculated is %d\n", calculated);
+		size_t test = PGALIGN(calculated);
 
-		fb_base[i][0] = (void*)mmap64(0, (size_t)create_dumb.size /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset); //2462400 * 4?
+		printf("create_dumb.size after x4 and page align: ");
+		printf("%d\n", test);
+
+		//1080x2280 is 2462400 pixels for the screen. If each pixel is 4 bytes, that should equate to a create_dumb.size of 9849600, but what we actually see is 9924608. 75008-byte discrepancy
+		fb_base[i][0] = (void*)mmap64(0, (size_t)test /*32 bits (4 bytes) per pixel?*/, PROT_READ | PROT_WRITE, MAP_SHARED, dri_fd, map_dumb.offset); 
 
 		if (fb_base[i][0] == MAP_FAILED) {
 			fprintf(stderr, "Mmap call failed with error %d: %m\n", errno);
@@ -500,7 +511,7 @@ int main()
 		printf("Mapping actual memory 2 using mmap64, requesting %lld bytes, offset is %lld...\n", create_dumb2.size, map_dumb2.offset);
 
 		//print out size requested with different formatter to verify
-		printf("create_dum2b.size again: ");
+		printf("create_dumb2.size again: ");
 		printf("%" PRId64 "\n", create_dumb2.size);
 
 
@@ -547,7 +558,7 @@ int main()
 		};*/
 
 		//instantiate a drm_mode_get_encoder struct
-		struct drm_mode_get_encoder enc={0};
+		struct drm_mode_get_encoder enc = {0};
 
 		//we already know the encoder ID
 		enc.encoder_id = conn.encoder_id;
@@ -580,6 +591,8 @@ int main()
 
 		//already should have the ID number of the CRTC for this encoder
 		//crtc.crtc_id = enc.crtc_id;
+
+		//OVERRIDE CRTC_ID NUMBER
 		crtc.crtc_id = 125;  //127-0 or 181-1?
 		printf("Already have the CRTC ID for this encoder, which is %d\n", crtc.crtc_id);
 
@@ -623,7 +636,7 @@ int main()
 		return -1;
 	}
 
-	/*
+	/*OPTIONAL
 	//Stop being the "master" of the DRI device - DROP MASTER
 	if (ioctl(dri_fd, DRM_IOCTL_DROP_MASTER, 0) !=0) {
 		fprintf(stderr, "Drm drop master failed with error %d: %m\n", errno);
@@ -632,6 +645,105 @@ int main()
 	printf("Drm drop master success\n");
 	*/
 
+
+	//pick a sequence to run now
+	ret = sequence_colors_fill_screen();
+	//ret = sequence_oscillate_square();
+	
+
+	printf("DONE\n");
+
+	//close the DRI dev
+	close(dri_fd);
+
+	return ret;
+}
+
+//display 100 seconds of beautiful colors filling the screen
+int sequence_colors_fill_screen() {
+	//iterators
+	int x, y;
+
+	printf("Starting iterations for writing to FB...\n");
+	for (i = 0; i < 100; i++)
+	{
+		int j;
+		void* current_page;
+
+
+		//iterate over all connectors
+		for (j = 0; j < res.count_connectors; j++)
+		{
+			if (j != valid_connector)
+				continue;
+
+			if (which_buf) {
+				current_page = fb_base[j][0];
+			}
+			else {
+				current_page = fb_base[j][1];
+			}
+
+			printf("Coloring for connector #%d\n", j);
+
+			//select random color
+			printf("Selecting color...\n");
+			int color = (rand() % 0x00ffffff) & 0x00ff00ff;
+			printf("Color is %d\n", color);
+
+
+			//for all rows of pixels
+			printf("Color selection done, starting coloring double-loop...\n");
+
+			printf("fb_h[j] reads %d, fb_w[j] read %d\n", fb_h[j][0], fb_w[j][0]);
+
+			for (y = 0; y < fb_h[j][0]; y++) {
+			
+				//printf("Row number %d\n", y);
+				//for all pixels in the row
+				for (x = 0; x < fb_w[j][0]; x++)
+				{
+					//printf("Calculating pixel location, column number %d\n", x);
+					//calculate offset into framebuffer memory for this pixel
+					int location = (y * (fb_w[j][0])) + x;
+
+					//printf("Setting pixel to color...\n");
+					//set this pixel to the color
+					*(((uint32_t*) current_page) + location) = color;
+				}
+			}
+
+			//double buffering
+			if (which_buf) {
+				crtc.fb_id = cmd_dumb.fb_id;
+				which_buf = 0;
+			}
+			else {
+				crtc.fb_id = cmd_dumb2.fb_id;
+				which_buf = 1;
+			}
+
+			//Connect the CRTC to the correct page (back page)
+			if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
+				fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
+				return errno;
+			}
+			printf("IOCTL_MODE_SETCRTC success\n");
+				
+
+			printf("Connector #%d done\n", j);
+		}
+
+		//sleep for 1 million microseconds = 1 sec = 1000ms between each color
+		usleep(1000000);
+
+		printf("Color #%d done\n", i);
+	}
+	return 0;
+}
+
+//make a red square bounce back and forth between the edges of the screen for 30 seconds
+int sequence_oscillate_square() {
 	//iterators
 	int x, y;
 
@@ -656,13 +768,12 @@ int main()
 			}
 
 			printf("Coloring for connector #%d\n", j);
+
 			//select random color
-
 			printf("Selecting color...\n");
-			int col = (rand() % 0x00ffffff) & 0x00ff00ff;
-			printf("Color is %d\n", col);
+			int color = (rand() % 0x00ffffff) & 0x00ff00ff;
+			printf("Color is %d\n", color);
 
-			//int col = 0xffffff00;
 
 			//for all rows of pixels
 			printf("Color selection done, starting coloring double-loop...\n");
@@ -670,14 +781,6 @@ int main()
 			printf("fb_h[j] reads %d, fb_w[j] read %d\n", fb_h[j][0], fb_w[j][0]);
 
 			for (y = 0; y < fb_h[j][0]; y++) {
-			/*
-				if (y%20==0) {
-						col = 0x00ff00ff;
-					}
-				else {
-					col = 0xffffffff;
-				}
-				*/
 			
 				//printf("Row number %d\n", y);
 				//for all pixels in the row
@@ -689,10 +792,11 @@ int main()
 
 					//printf("Setting pixel to color...\n");
 					//set this pixel to the color
-					*(((uint32_t*) current_page) + location) = col;
+					*(((uint32_t*) current_page) + location) = color;
 				}
 			}
 
+			//double buffering
 			if (which_buf) {
 				crtc.fb_id = cmd_dumb.fb_id;
 				which_buf = 0;
@@ -711,16 +815,12 @@ int main()
 				
 
 			printf("Connector #%d done\n", j);
+		}
 
-			}
-
-		//sleep for 100k microseconds = 0.1 sec = 100ms between each color
+		//sleep for 1 million microseconds = 1 sec = 1000ms between each color
 		usleep(1000000);
 
 		printf("Color #%d done\n", i);
 	}
-
-	printf("DONE\n");
-	close(dri_fd);
 	return 0;
 }

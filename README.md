@@ -31,11 +31,13 @@ Finally, to run the executable, you first need to shut down Android's native dis
 ```
 stop vendor.hwcomposer-2-x
 ```  
-where x can vary but is probably 3 for Android 10 and 4 for Android 11. You can check by running ```ls /vendor/etc/init/android.hardware.graphics.composer@*``` and looking at the two numbers.
+where x can vary but is probably 3 for Android 10 and 4 for Android 11. You can check by running   
+```ls /vendor/etc/init/android.hardware.graphics.composer@*```   
+and looking at the two numbers.
 
 If the stop command succeeded, you should now be able to successfully run the executable.  
 
-##UPDATES##  
+## UPDATES ##  
 (07/30/20): The program is now finished; everything's working. A kernel mod could do the job, but an easier way is to just do some debugging of the DRM driver using printk, or, even easier, use the modetest tool. Specifically, you need to find out what the correct encoder ID and corresponding CRTC ID are for DSI-1. (You'll see this as one of the encoder types in the modetest output.) For the Pixel, my encoder was 27, and the corresponding CRTC was 127 (it might be 125 for Android 11). It seems like the latest versions of Android for the Pixel 4 come with libdrm in /external; to build the modetest executable, set up the AOSP build normally (using lunch, etc.), then cd into /external/libdrm/tests/modetest and run 'mma'. When the build finishes it should tell you where it stored the output executable; mine was in /home/[USER]/Documents/aosp/working/out/target/product/flame/data/nativetest/modetest. Push the executable to /system/bin on the Pixel device, then cd into bin and run   
 ```
 ./modetest -M msm_drm.  
@@ -46,7 +48,7 @@ If you have the capacity to build kernels for Android, I found that debugging th
 
 (07/18/20): Running on Android devices probably requires a kernel patch in order to access the encoder. I'm working on it but won't be able to get around to posting it for another week or so.  
 
-##NOTES##  
+## NOTES ##  
 * One thing to note is that, at least on the Pixel 4 with AOSP, the rendering won't work unless you implement double buffering, as done in this example. This must have something to do with VSYNC and the fact that this DSI encoder is in command mode, so it's not flushing out the frames/refreshing correctly. 
 
 * For some reason, after I run ```stop vendor.hwcomposer-2-x```, I often have to run   
