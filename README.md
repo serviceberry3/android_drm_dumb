@@ -27,17 +27,36 @@ adb root
 ```  
 after a reboot.
 
-Finally, to run the executable, you first need to shut down Android's native display server by running  
+Finally, to run the executable, you first need to double check the line  
 ```
 stop vendor.hwcomposer-2-x
 ```  
 where x can vary but is probably 3 for Android 10 and 4 for Android 11. You can check by running   
 ```ls /vendor/etc/init/android.hardware.graphics.composer@*```   
-and looking at the two numbers.
+and looking at the two numbers. Change this line appropriately in the code.
 
 If the stop command succeeded, you should now be able to successfully run the executable.  
 
 ## UPDATES ##  
+(12/12/20): In order to be able to allocate dumb buffers that are larger than the Pixel's screen size, you need to modify the drm_internal_framebuffer_create() function in the DRM driver, found in /private/msm-google/drivers/gpu/drm/drm_framebuffers.c. This function is called for the DRM_IOCTL_MODE_ADDFB ioctl. To avoid a bail due to input dimensions being too big, you need to build a custom kernel and comment out the lines
+```  
+
+if ((config->min_width > r->width) || (r->width > config->max_width)) {
+    DRM_DEBUG_KMS("bad framebuffer width %d, should be >= %d && <= %d\n",
+            r->width, config->min_width, config->max_width);
+    return ERR_PTR(-EINVAL);
+}
+if ((config->min_height > r->height) || (r->height > config->max_height)) {
+    DRM_DEBUG_KMS("bad framebuffer height %d, should be >= %d && <= %d\n",
+            r->height, config->min_height, config->max_height);
+    return ERR_PTR(-EINVAL);
+}
+```  
+then the 4x multiplier in lines 390, 391, etc. of my program should work.  
+
+I'm currently working on a kernel mod to change the mmap offset that's read as the dumbuffer. It involves changing the drm_vma_offset_add() function in drm_vma_manager.c of the driver code.  
+
+
 (07/30/20): The program is now finished; everything's working. A kernel mod could do the job, but an easier way is to just do some debugging of the DRM driver using printk, or, even easier, use the modetest tool. Specifically, you need to find out what the correct encoder ID and corresponding CRTC ID are for DSI-1. (You'll see this as one of the encoder types in the modetest output.) For the Pixel, my encoder was 27, and the corresponding CRTC was 127 (it might be 125 for Android 11). It seems like the latest versions of Android for the Pixel 4 come with libdrm in /external; to build the modetest executable, set up the AOSP build normally (using lunch, etc.), then cd into /external/libdrm/tests/modetest and run 'mma'. When the build finishes it should tell you where it stored the output executable; mine was in /home/[USER]/Documents/aosp/working/out/target/product/flame/data/nativetest/modetest. Push the executable to /system/bin on the Pixel device, then cd into bin and run   
 ```
 ./modetest -M msm_drm 
