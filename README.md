@@ -35,7 +35,11 @@ where x can vary but is probably 3 for Android 10 and 4 for Android 11. You can 
 ```ls /vendor/etc/init/android.hardware.graphics.composer@*```   
 and looking at the two numbers. Change this line appropriately in the code.
 
-If the stop command succeeded, you should now be able to successfully run the executable.  
+If the stop command succeeded, you should now be able to successfully run the executable. Afterwards, run  
+```  
+start vendor.hwcomposer-2-x
+```  
+to resume the display service (see tip about this in NOTES).
 
 ## UPDATES ##  
 (12/21/20): In order to be able to allocate dumb buffers that are larger than the Pixel's screen size, you need to modify the drm_internal_framebuffer_create() function in the DRM driver, found in /private/msm-google/drivers/gpu/drm/drm_framebuffers.c. This function is called for the DRM_IOCTL_MODE_ADDFB ioctl. To avoid a bail due to input dimensions being too big, you need to build a custom kernel and comment out the lines
