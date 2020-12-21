@@ -27,7 +27,9 @@ adb root
 ```  
 after a reboot.
 
-Finally, to run the executable, you first need to double check the line  
+To run the executable, read the 07/30/20 update below and check the IDs for the DRM encoder and CRTC.
+
+Also, double check the line  
 ```
 stop vendor.hwcomposer-2-x
 ```  
@@ -35,7 +37,7 @@ where x can vary but is probably 3 for Android 10 and 4 for Android 11. You can 
 ```ls /vendor/etc/init/android.hardware.graphics.composer@*```   
 and looking at the two numbers. Change this line appropriately in the code.
 
-If the stop command succeeded, you should now be able to successfully run the executable. Afterwards, run  
+If the stop command succeeds, the executable should run successfully. Afterwards, run  
 ```  
 start vendor.hwcomposer-2-x
 ```  
@@ -58,7 +60,7 @@ if ((config->min_height > r->height) || (r->height > config->max_height)) {
 ```  
 then the 4x multiplier in lines 390, 391, etc. of my program should work.  
 
-I'm currently working on a kernel mod to change the mmap offset that's read as the dumbuffer. It involves changing the drm_vma_offset_add() function in drm_vma_manager.c of the driver code.  
+I'm currently working on a kernel mod to change the mmap offset that's read as the dumb buffer. It involves changing the drm_vma_offset_add() function in drm_vma_manager.c of the driver code.  
 
 
 (07/30/20): The program is now finished; everything's working. A kernel mod could do the job, but an easier way is to just do some debugging of the DRM driver using printk, or, even easier, use the modetest tool. Specifically, you need to find out what the correct encoder ID and corresponding CRTC ID are for DSI-1. (You'll see this as one of the encoder types in the modetest output.) For the Pixel, my encoder was 27, and the corresponding CRTC was 127 (it might be 125 for Android 11). It seems like the latest versions of Android for the Pixel 4 come with libdrm in /external; to build the modetest executable, set up the AOSP build normally (using lunch, etc.), then cd into /external/libdrm/tests/modetest and run 'mma'. When the build finishes it should tell you where it stored the output executable; mine was in /home/[USER]/Documents/aosp/working/out/target/product/flame/data/nativetest/modetest. Push the executable to /system/bin on the Pixel device, then cd into bin and run   
