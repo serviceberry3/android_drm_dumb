@@ -38,7 +38,7 @@ and looking at the two numbers. Change this line appropriately in the code.
 If the stop command succeeded, you should now be able to successfully run the executable.  
 
 ## UPDATES ##  
-(12/12/20): In order to be able to allocate dumb buffers that are larger than the Pixel's screen size, you need to modify the drm_internal_framebuffer_create() function in the DRM driver, found in /private/msm-google/drivers/gpu/drm/drm_framebuffers.c. This function is called for the DRM_IOCTL_MODE_ADDFB ioctl. To avoid a bail due to input dimensions being too big, you need to build a custom kernel and comment out the lines
+(12/21/20): In order to be able to allocate dumb buffers that are larger than the Pixel's screen size, you need to modify the drm_internal_framebuffer_create() function in the DRM driver, found in /private/msm-google/drivers/gpu/drm/drm_framebuffers.c. This function is called for the DRM_IOCTL_MODE_ADDFB ioctl. To avoid a bail due to input dimensions being too big, you need to build a custom kernel and comment out the lines
 ```  
 
 if ((config->min_width > r->width) || (r->width > config->max_width)) {
