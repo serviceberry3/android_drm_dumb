@@ -86,3 +86,11 @@ input keyevent 26
 ```  
 
 * mmap64 is required...some knowledgeable people tell me that has something to do with bionic?   
+
+
+## PREVIEWS ##
+
+
+
+[![Demo CountPages alpha](https://share.gifyoutube.com/KzB6Gb.gif)](https://www.youtube.com/watch?v=ek1j272iAmc)
+
