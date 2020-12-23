@@ -89,9 +89,12 @@ input keyevent 26
 
 
 ## PREVIEWS ##
+Full-screen colors using double-buffering  
+![Flash fullscreen colors preview](https://github.com/serviceberry3/android_drm_dumb/blob/master/img/colors.gif?raw=true)
 
+Bouncing square by filling a buffer 4x as large as the screen with white, drawing the square once, then indexing into the buffer on each iteration. Average time per move of the square is ~73 microseconds. Only one buffer is used
+(no double-buffering) because there's no rerendering.  
+![Bouncing square preview](https://github.com/serviceberry3/android_drm_dumb/blob/master/img/square.gif?raw=true)
 
-
-![Flash fullscreen colors preview](https://github.com/serviceberry3/android_drm_dumb/blob/master/img/output.gif?raw=true)
 
 
