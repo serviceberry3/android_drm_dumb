@@ -34,6 +34,7 @@
 //function predeclarations
 int sequence_colors_fill_screen();
 int sequence_oscillate_square();
+void draw_square(int color, int buff_full);
 
 
 /*for reference
@@ -712,29 +713,6 @@ int sequence_colors_fill_screen() {
 				continue;
 
 
-
-			/*
-			if (oscillator<=500 && direction==0) {
-				fb_base[j][0]+=oscillator;
-				fb_base[j][1]+=oscillator;
-				oscillator++;
-			}
-			else if (oscillator==501 && direction==0) {
-				direction = 1;
-				fb_base[j][0]+=501;
-				fb_base[j][1]+=501;
-			}
-
-			if (oscillator>0 && direction==1) {
-				fb_base[j][0]-=500-oscillator;
-				fb_base[j][1]-=500-oscillator;
-				oscillator--;
-			}
-			else if (oscillator==0 && direction==1) {
-				direction=0;
-			}*/
-
-
 			//double buffering
 			if (which_buf) {
 				current_page = fb_base[j][0];
@@ -744,7 +722,6 @@ int sequence_colors_fill_screen() {
 			}
 
 
-			
 			
 			printf("Coloring for connector #%d\n", j);
 
@@ -804,37 +781,100 @@ int sequence_colors_fill_screen() {
 	return 0;
 }
 
-int drmModeMoveCursor(int fd, uint32_t crtcId, int x, int y)
-{
-
-	memclear(cursor_test);
-
-	cursor_test.flags = DRM_MODE_CURSOR_MOVE;
-	cursor_test.crtc_id = crtcId;
-	cursor_test.x = 0;
-	cursor_test.y = 0;
-
-
-	if (ioctl(fd, DRM_IOCTL_MODE_CURSOR, &cursor_test) != 0) {
-		fprintf(stderr, "Drm mode cursor failed with error %d: %m\n", errno);
-		return errno;
-	}
-	printf("IOCTL_MODE_CURSOR success\n");
-
-	return 0;
-}
 
 //make a red square bounce back and forth between the edges of the screen for 30 seconds
 int sequence_oscillate_square() {
 	//iterators
-	int x, y, k, j;
+	int j, k;
+
+	//draw static image once
+	draw_square(0x00000000, 0);
+
+
+	//Bounce the square back and forth across the screen for 15 seconds.
+
+
+	//use back buffer
+	crtc.fb_id = cmd_dumb2.fb_id;
+
+	//outer loop for convenience
+	for (i = 0; i < 1; i++) {
+		double time_taken = 0;
+		clock_t t;
+
+		//move square to left of screen
+		for (j = 0; j < 20; j++) {
+			/*
+			//double buffering - unnecessary here since we're not rerendering
+			if (which_buf) {
+				crtc.fb_id = cmd_dumb.fb_id;
+				which_buf = 0;
+			}
+			else {
+				crtc.fb_id = cmd_dumb2.fb_id;
+				which_buf = 1;
+			}*/
+
+			//move square to left side of screen by increasing the x index into the framebuffer and resetting the CRTC
+			for (k = 0; k < 9; k++) {
+				t = clock(); 
+			
+				crtc.x += 80;
+
+				//Connect the CRTC to the correct page (back page)
+				if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
+					fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
+					return errno;
+				}
+
+				t = clock() - t; 
+
+				time_taken += (double)t; // in seconds 
+			}
+
+
+			//move square back to right side of screen
+			for (k = 0; k < 9; k++) {
+				t = clock();
+
+				crtc.x -= 80;
+
+				//Connect the CRTC to the correct page (back page)
+				if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
+					fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
+					return errno;
+				}
+
+				t = clock() - t;
+
+				time_taken += (double)t;
+			}
+
+
+		}
+
+		//print out average speed of a move (should be ~73 microseconds)
+		printf("Averaged %f seconds per move\n", time_taken / 360.0 / CLOCKS_PER_SEC);
+	}
+	return 0;
+}
+
+
+//draw a square on the right-hand side of the screen
+void draw_square(int color, int buff_full) {
+	//iterators
+	int j, x, y;
 
 	void* current_page;
+	int white, square;
 
-	//fb_base[0][0] = (void*) ((uintptr_t)fb_base[0][0] + (uintptr_t)16*32); //we have 157593600 bytes reserved here (4320 wide * 9120 tall * 4 bytes/pixel)
-	//fb_base[0][1] = (void*) ((uintptr_t)fb_base[0][1] - (uintptr_t)16*32);  //we have 157593600 bytes reserved here (4320 wide * 9120 tall * 4 bytes/pixel)
+	int x_width;
 
-	//draw a purple square once on the side of the screen, in both buffers
+	int off = 0;
+
+
+
+	//iterate over all of our connectors (should just be one)
 	for (j = 0; j < res.count_connectors; j++)
 	{
 		//make sure this is a valid connector
@@ -848,25 +888,33 @@ int sequence_oscillate_square() {
 			current_page = fb_base[j][1];
 		}
 
+		//if buff_full is 1, use entire buffer width (twice the width of the screen), otherwise just use half
+		x_width = (buff_full) ? fb_w[j][0] : fb_w[j][0] / 2;
+
 
 		printf("Coloring for connector #%d\n", j);
 
-		//select light purple as color
-		int color = 0x008B00D2;
+		//set color values
+		square = color;
+		white = 0xFFFFFFFF;
 
 
-		printf("Color selection done, starting coloring double-loop...\n");
+		printf("Color selection done, starting coloring loops...\n");
 		printf("fb_h[j] reads %d, fb_w[j] read %d\n", fb_h[j][0], fb_w[j][0]);
 
 		int off = 0;
 		
+		
+		//DRAW BLACK SQUARE ON WHITE BACKGROUND - ONLY ON TOP-LEFT QUARTER OF FRAMEBUFFER
+
+
 		//for all rows of pixels
 		for (y = 0; y < fb_h[j][0] / 2; y++) { //iterates ~4560 times   //fb_h[j][0] / 2
 		
 			if (y > 1000 && y < 1400) {
 			//printf("Row number %d\n", y);
 			//for all pixels in the row
-				for (x = 0; x < fb_w[j][0] / 2; x++) //iterates ~2160 times
+				for (x = 0; x < x_width; x++) //iterates ~2160 times
 				{
 						if (x > 680 && x < 1080) {
 							//printf("Calculating pixel location, column number %d\n", x);
@@ -876,124 +924,47 @@ int sequence_oscillate_square() {
 
 							//printf("Setting pixel to color...\n");
 							//set this pixel to the color
-							*(((uint32_t*) current_page) + location) = color;
+							*(((uint32_t*) current_page) + location) = square;
 						
 						}
+
+						else {
+							//printf("Calculating pixel location, column number %d\n", x);
+							//calculate offset into framebuffer memory for this pixel
+							//note: need to skip over extra pad on side using off
+							int location = (y * fb_w[j][0] + off) + x; //fb_w[j][0]
+
+							//printf("Setting pixel to color...\n");
+							//set this pixel to the color
+							*(((uint32_t*) current_page) + location) = white;
+						}
+
+						
 				}
 			}
+
+
+			//for rows outside of the square, apply white
+			else {
+				for (x = 0; x < x_width; x++) //iterates ~2160 times
+				{
+				
+					//calculate offset into framebuffer memory for this pixel
+					//note: need to skip over extra pad on side using off
+					int location = (y * fb_w[j][0] + off) + x; //fb_w[j][0]
+
+					//printf("Setting pixel to color...\n");
+					//set this pixel to the color
+					*(((uint32_t*) current_page) + location) = white;
+				
+				}
+			}
+
+
 			//apparently the fb isn't acutally 1080 x 2280 :)
 			off+=16;
 		}
 
 
-		/*
-		for (int i = 0; i < 1080 * 500; i++) {
-
-			*(((uint32_t*) current_page) + i) = color;
-	
-		}*/
 	}
-
-
-
-	//bounce the square back and forth across the screen for 15 seconds
-
-
-
-	crtc.fb_id = cmd_dumb2.fb_id;
-	
-	for (i = 0; i < 1; i++) {
-
-		current_page = fb_base[0][1];
-
-			double time_taken = 0;
-			clock_t t;
-
-		//move square to left of screen
-		for (j = 0; j < 20; j++) {
-
-
-			/*
-			//double buffering
-			if (which_buf) {
-				crtc.fb_id = cmd_dumb.fb_id;
-				which_buf = 0;
-			}
-			else {
-				crtc.fb_id = cmd_dumb2.fb_id;
-				which_buf = 1;
-			}*/
-
-
-
-			//move to left side
-
-			for (int k = 0; k < 9; k++) {
-				t = clock(); 
-			
-		
-
-				crtc.x += 80;
-
-				//Connect the CRTC to the correct page (back page)
-				if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
-					fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
-					return errno;
-				}
-
-
-				t = clock() - t; 
-
-				time_taken += (double)t; // in seconds 
-			
-				//printf("Move took %f seconds to execute \n", time_taken); 
-
-				//printf("IOCTL_MODE_SETCRTC success\n");
-					
-				//usleep(3000000);
-
-			}
-
-			
-
-
-
-
-			//move back to right side
-			for (int k = 0; k < 9; k++) {
-
-				t = clock();
-				crtc.x -= 80;
-
-				//Connect the CRTC to the correct page (back page)
-				if (ioctl(dri_fd, DRM_IOCTL_MODE_SETCRTC, &crtc) !=0) {
-					fprintf(stderr, "Drm mode set CRTC failed with error %d: %m\n", errno);
-					return errno;
-				}
-
-
-				t = clock() - t;
-
-				time_taken += (double)t;
-
-				//printf("IOCTL_MODE_SETCRTC success\n");
-					
-				//usleep(3000000);
-
-			}
-
-
-		}
-
-
-		printf("Averaged %f seconds per move\n", time_taken / 360.0 / CLOCKS_PER_SEC);
-	}
-
-
-
-
-
-
-
-	return 0;
 }
