@@ -92,5 +92,6 @@ input keyevent 26
 
 
 
-![Flash fullscreen colors preview](img/colors.gif)
+![Flash fullscreen colors preview](https://github.com/serviceberry3/android_drm_dumb/blob/master/img/output.gif?raw=true)
+
 
